@@ -3,7 +3,29 @@ import zipfile
 from PIL import Image
 from django.test import TestCase, Client
 from django.core.files.uploadedfile import SimpleUploadedFile
-from converter.views import convert_image
+from converter.views import convert_image, sanitize_filename
+
+
+class SanitizeFilenameTestCase(TestCase):
+    """Test cases for filename sanitization."""
+
+    def test_normal_filename(self):
+        """Test that normal filenames are preserved."""
+        self.assertEqual(sanitize_filename('image.png'), 'image.png')
+
+    def test_path_traversal(self):
+        """Test that path traversal is prevented."""
+        # Only the base filename is preserved after path components are stripped
+        self.assertEqual(sanitize_filename('../../../etc/passwd'), 'passwd')
+
+    def test_special_characters(self):
+        """Test that special characters are replaced."""
+        # < > : are replaced with underscores
+        self.assertEqual(sanitize_filename('image<>:.png'), 'image___.png')
+
+    def test_dot_filename(self):
+        """Test that dot-only filenames are handled."""
+        self.assertFalse(sanitize_filename('.hidden').startswith('.'))
 
 
 class ConvertImageTestCase(TestCase):
@@ -159,3 +181,33 @@ class ConvertViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Invalid resolution')
 
+    def test_unsupported_content_type(self):
+        """Test error when unsupported content type is uploaded."""
+        response = self.client.post('/convert/', {
+            'images': SimpleUploadedFile('test.gif', b'fake gif data', content_type='image/gif'),
+            'resolution': 'hd'
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'No files could be converted')
+
+    def test_filename_collision(self):
+        """Test that filename collisions are handled."""
+        png_data = self.create_png_bytes()
+
+        response = self.client.post('/convert/', {
+            'images': [
+                SimpleUploadedFile('test.png', png_data, content_type='image/png'),
+                SimpleUploadedFile('test.png', png_data, content_type='image/png'),
+            ],
+            'resolution': 'hd'
+        })
+
+        self.assertEqual(response.status_code, 200)
+
+        zip_buffer = io.BytesIO(response.content)
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            files = zf.namelist()
+            self.assertEqual(len(files), 2)
+            self.assertIn('test.png', files)
+            self.assertIn('test_1.png', files)

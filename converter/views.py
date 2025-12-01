@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import zipfile
 from datetime import datetime
 from PIL import Image
@@ -11,6 +12,27 @@ RESOLUTIONS = {
     'hd': (1280, 720),
     'fullhd': (1920, 1080),
 }
+
+# Max file size: 10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+# Allowed MIME types
+ALLOWED_CONTENT_TYPES = {'image/jpeg', 'image/png'}
+
+
+def sanitize_filename(filename):
+    """
+    Sanitize filename to prevent path traversal and other security issues.
+    Only allow alphanumeric characters, hyphens, underscores, and dots.
+    """
+    # Get just the base name (no directory components)
+    basename = os.path.basename(filename)
+    # Remove any potentially dangerous characters
+    sanitized = re.sub(r'[^\w\-.]', '_', basename)
+    # Prevent empty or dot-only filenames
+    if not sanitized or sanitized.startswith('.'):
+        sanitized = 'image' + sanitized
+    return sanitized
 
 
 def convert_image(image_file, target_width, target_height):
@@ -91,27 +113,53 @@ def convert(request):
     # Create ZIP file in memory
     zip_buffer = io.BytesIO()
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    failed_files = []
+    used_filenames = set()
 
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for uploaded_file in files:
-            # Get original filename without extension
-            original_name = os.path.splitext(uploaded_file.name)[0]
+            # Validate file size
+            if uploaded_file.size > MAX_FILE_SIZE:
+                failed_files.append(f"{uploaded_file.name} (file too large)")
+                continue
+
+            # Validate content type
+            if uploaded_file.content_type not in ALLOWED_CONTENT_TYPES:
+                failed_files.append(f"{uploaded_file.name} (unsupported format)")
+                continue
+
+            # Sanitize and get original filename without extension
+            sanitized_name = sanitize_filename(uploaded_file.name)
+            original_name = os.path.splitext(sanitized_name)[0]
 
             try:
                 converted_buffer, output_format = convert_image(
                     uploaded_file, target_width, target_height
                 )
 
-                # Create output filename
-                output_filename = f"{original_name}.{output_format}"
+                # Create unique output filename to avoid collisions
+                base_filename = f"{original_name}.{output_format}"
+                output_filename = base_filename
+                counter = 1
+                while output_filename in used_filenames:
+                    output_filename = f"{original_name}_{counter}.{output_format}"
+                    counter += 1
+                used_filenames.add(output_filename)
 
                 # Add to ZIP
                 zip_file.writestr(output_filename, converted_buffer.read())
             except Exception:
-                # Skip files that can't be processed
+                failed_files.append(f"{uploaded_file.name} (conversion failed)")
                 continue
 
     zip_buffer.seek(0)
+
+    # Check if any files were successfully converted
+    if not used_filenames:
+        error_msg = 'No files could be converted.'
+        if failed_files:
+            error_msg += f' Failed: {", ".join(failed_files)}'
+        return render(request, 'converter/index.html', {'error': error_msg})
 
     # Create response with ZIP file
     resolution_label = 'hd' if resolution == 'hd' else 'fullhd'
@@ -121,4 +169,3 @@ def convert(request):
     response['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
 
     return response
-
