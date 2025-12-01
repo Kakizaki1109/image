@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        input[type="file"] {
+            margin-bottom: 15px;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .error {
+            color: red;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Converter</h1>
+    <p>Upload images (JPEG/PNG) and convert them to HD resolution with aspect ratio preserved.</p>
+
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <form action="{% url 'convert' %}" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="images">Select images (multiple allowed):</label>
+        <input type="file" id="images" name="images" accept="image/jpeg,image/png" multiple required>
+
+        <label for="resolution">Target resolution:</label>
+        <select id="resolution" name="resolution">
+            <option value="hd">HD (1280x720)</option>
+            <option value="fullhd">Full HD (1920x1080)</option>
+        </select>
+
+        <button type="submit">Convert and Download ZIP</button>
+    </form>
+</body>
+</html>
